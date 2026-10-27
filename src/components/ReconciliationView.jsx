@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Calendar, Filter, CheckCircle, Search, AlertCircle, RefreshCw, Layers, Download } from 'lucide-react';
 
 export default function ReconciliationView() {
@@ -102,7 +102,7 @@ export default function ReconciliationView() {
   };
 
   const handleCloseMonth = async () => {
-    if (!window.confirm("Haqiqatan ham oyni yopmoqchimisiz? Barcha hisobotlar joriy sanadan boshlab noldan hisoblanadi.")) {
+    if (!window.confirm("Ushbu oy bo'yicha hisobotni belgilamoqchimisiz? Tizim hisob-kitoblari o'chmaydi va uzluksiz davom etadi.")) {
       return;
     }
     try {
@@ -115,7 +115,7 @@ export default function ReconciliationView() {
         })
       });
       if (res.ok) {
-        alert("Oy muvaffaqiyatli yopildi!");
+        alert("Oylik hisobot muvaffaqiyatli belgilandi!");
         loadData();
       }
     } catch (err) {
@@ -144,10 +144,15 @@ export default function ReconciliationView() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h2 className="text-2xl font-black text-slate-800 flex items-center space-x-2">
-          <Layers className="w-7 h-7 text-indigo-600" />
-          <span>Sverka va Oyni Yopish</span>
-        </h2>
+        <div>
+          <h2 className="text-2xl font-black text-slate-800 flex items-center space-x-2">
+            <Layers className="w-7 h-7 text-indigo-600" />
+            <span>Sverka va Oylik Solishtirish</span>
+          </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Do'konlar va hamkorlar bilan qabul qilingan xomashyo summasini birma-bir solishtirish (sverka)
+          </p>
+        </div>
         <div className="flex flex-wrap gap-3">
           <button 
             onClick={exportToExcel}
@@ -158,10 +163,10 @@ export default function ReconciliationView() {
           </button>
           <button 
             onClick={handleCloseMonth}
-            className="flex items-center space-x-2 px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold shadow-md transition"
+            className="flex items-center space-x-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold shadow-md transition"
           >
-            <AlertCircle className="w-5 h-5" />
-            <span>Joriy Oyni Yopish (Nollash)</span>
+            <CheckCircle className="w-5 h-5 text-emerald-400" />
+            <span>Oylik Hisobotni Saqlash / Belgilash</span>
           </button>
         </div>
       </div>
@@ -172,12 +177,12 @@ export default function ReconciliationView() {
             <CheckCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
             <div>
               <span className="font-bold text-sm block">Oxirgi marta oy yopilgan sana: {closures[0].closure_date}</span>
-              <span className="text-xs text-amber-700">Tizim shu sanadan boshlab qoldiqlarni hisoblamoqda</span>
+              <span className="text-xs text-amber-700">Hisob-kitoblar saqlanmoqda, umumiy balans uzluksiz davom etmoqda</span>
             </div>
           </div>
           <button
             onClick={() => handleUndoClosure(closures[0].id)}
-            className="px-3 py-1.5 bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition shadow-sm self-start sm:self-auto"
+            className="px-3.5 py-1.5 bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition shadow-sm self-start sm:self-auto"
           >
             Yopilishni Bekor Qilish (Tuzatish)
           </button>

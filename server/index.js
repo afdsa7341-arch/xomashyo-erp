@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -632,63 +632,92 @@ app.delete('/api/expenses/:id', async (req, res) => {
 
 app.get('/api/stats', async (req, res) => {
   try {
-    const lastClosureRow = await db.prepare('SELECT closure_date FROM month_closures ORDER BY closure_date DESC, id DESC LIMIT 1').get();
-    let minDateQuery = "";
-    let params = [];
+    const { period } = req.query; // 'all' (default), 'month' (current calendar month), 'closure'
 
-    if (lastClosureRow && lastClosureRow.closure_date) {
-      minDateQuery = " AND date >= ? ";
-      params.push(lastClosureRow.closure_date);
+    // Yordamchi hisob-kitob funksiyasi
+    const calcMetrics = async (dateCondition = "", params = []) => {
+      const buyStats = await db.prepare(`
+        SELECT 
+          COALESCE(SUM(karton_kg), 0) as total_karton_bought_kg,
+          COALESCE(SUM(salafan_kg), 0) as total_salafan_bought_kg,
+          COALESCE(SUM(total_amount), 0) as total_bought_sum
+        FROM deliveries
+        WHERE status = 'BAJARILDI' AND (is_active = 1 OR is_active IS NULL) ${dateCondition}
+      `).get(...params);
+
+      const saleKarton = await db.prepare(`
+        SELECT 
+          COALESCE(SUM(weight_kg), 0) as total_sold_kg,
+          COALESCE(SUM(total_amount), 0) as total_sold_sum
+        FROM sales
+        WHERE material_type = 'KARTON' AND (is_active = 1 OR is_active IS NULL) ${dateCondition}
+      `).get(...params);
+
+      const saleSalafan = await db.prepare(`
+        SELECT 
+          COALESCE(SUM(weight_kg), 0) as total_sold_kg,
+          COALESCE(SUM(total_amount), 0) as total_sold_sum
+        FROM sales
+        WHERE material_type = 'SALAFAN' AND (is_active = 1 OR is_active IS NULL) ${dateCondition}
+      `).get(...params);
+
+      const totalSoldSum = Number(saleKarton.total_sold_sum || 0) + Number(saleSalafan.total_sold_sum || 0);
+
+      const gasExpense = Number((await db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE category = 'GAZ' AND (is_active = 1 OR is_active IS NULL) ${dateCondition}`).get(...params)).total || 0);
+      const otherExpense = Number((await db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE category != 'GAZ' AND (is_active = 1 OR is_active IS NULL) ${dateCondition}`).get(...params)).total || 0);
+      const totalExpenses = gasExpense + otherExpense;
+
+      const netProfit = totalSoldSum - Number(buyStats.total_bought_sum || 0) - totalExpenses;
+
+      return {
+        total_sales_income: totalSoldSum,
+        total_purchases_cost: Number(buyStats.total_bought_sum || 0),
+        gas_expenses: gasExpense,
+        other_expenses: otherExpense,
+        total_expenses: totalExpenses,
+        net_profit: netProfit,
+        total_karton_bought_kg: Number(buyStats.total_karton_bought_kg || 0),
+        total_salafan_bought_kg: Number(buyStats.total_salafan_bought_kg || 0),
+        total_karton_sold_kg: Number(saleKarton.total_sold_kg || 0),
+        total_salafan_sold_kg: Number(saleSalafan.total_sold_kg || 0)
+      };
+    };
+
+    // 1. Barcha davr (Uzluksiz hisob - hech qachon nollanmaydi)
+    const allTime = await calcMetrics();
+
+    // 2. Joriy oy (Kalendar oy boshidan boshlab)
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = String(now.getMonth() + 1).padStart(2, '0');
+    const startOfMonth = `${curYear}-${curMonth}-01`;
+    const currentMonthStats = await calcMetrics(" AND date >= ? ", [startOfMonth]);
+
+    // 3. Ombor qoldig'i (Har doim umumiy qoldiq bo'yicha)
+    const kartonStockKg = Math.max(0, allTime.total_karton_bought_kg - allTime.total_karton_sold_kg);
+    const salafanStockKg = Math.max(0, allTime.total_salafan_bought_kg - allTime.total_salafan_sold_kg);
+
+    // Qaysi davr so'ralgan bo'lsa, o'shani `financial` da qaytaramiz
+    let activeFinancial = allTime;
+    let activeTurnover = {
+      total_karton_bought_kg: allTime.total_karton_bought_kg,
+      total_salafan_bought_kg: allTime.total_salafan_bought_kg,
+      total_karton_sold_kg: allTime.total_karton_sold_kg,
+      total_salafan_sold_kg: allTime.total_salafan_sold_kg
+    };
+
+    if (period === 'month') {
+      activeFinancial = currentMonthStats;
+      activeTurnover = {
+        total_karton_bought_kg: currentMonthStats.total_karton_bought_kg,
+        total_salafan_bought_kg: currentMonthStats.total_salafan_bought_kg,
+        total_karton_sold_kg: currentMonthStats.total_karton_sold_kg,
+        total_salafan_sold_kg: currentMonthStats.total_salafan_sold_kg
+      };
     }
 
-    const buyStats = await db.prepare(`
-      SELECT 
-        COALESCE(SUM(karton_kg), 0) as total_karton_bought_kg,
-        COALESCE(SUM(salafan_kg), 0) as total_salafan_bought_kg,
-        COALESCE(SUM(total_amount), 0) as total_bought_sum
-      FROM deliveries
-      WHERE status = 'BAJARILDI' AND (is_active = 1 OR is_active IS NULL) ${minDateQuery}
-    `).get(...params);
-
-    const saleKarton = await db.prepare(`
-      SELECT 
-        COALESCE(SUM(weight_kg), 0) as total_sold_kg,
-        COALESCE(SUM(total_amount), 0) as total_sold_sum
-      FROM sales
-      WHERE material_type = 'KARTON' AND (is_active = 1 OR is_active IS NULL) ${minDateQuery}
-    `).get(...params);
-
-    const saleSalafan = await db.prepare(`
-      SELECT 
-        COALESCE(SUM(weight_kg), 0) as total_sold_kg,
-        COALESCE(SUM(total_amount), 0) as total_sold_sum
-      FROM sales
-      WHERE material_type = 'SALAFAN' AND (is_active = 1 OR is_active IS NULL) ${minDateQuery}
-    `).get(...params);
-
-    const totalSoldSum = saleKarton.total_sold_sum + saleSalafan.total_sold_sum;
-
-    const buyStatsAll = await db.prepare(`
-      SELECT 
-        COALESCE(SUM(karton_kg), 0) as total_karton_bought_kg,
-        COALESCE(SUM(salafan_kg), 0) as total_salafan_bought_kg
-      FROM deliveries
-      WHERE status = 'BAJARILDI' AND (is_active = 1 OR is_active IS NULL)
-    `).get();
-    
-    const saleKartonAll = await db.prepare(`SELECT COALESCE(SUM(weight_kg), 0) as total_sold_kg FROM sales WHERE material_type = 'KARTON' AND (is_active = 1 OR is_active IS NULL)`).get();
-    const saleSalafanAll = await db.prepare(`SELECT COALESCE(SUM(weight_kg), 0) as total_sold_kg FROM sales WHERE material_type = 'SALAFAN' AND (is_active = 1 OR is_active IS NULL)`).get();
-
-    const kartonStockKg = Math.max(0, buyStatsAll.total_karton_bought_kg - saleKartonAll.total_sold_kg);
-    const salafanStockKg = Math.max(0, buyStatsAll.total_salafan_bought_kg - saleSalafanAll.total_sold_kg);
-
-    const gasExpense = (await db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE category = 'GAZ' AND (is_active = 1 OR is_active IS NULL) ${minDateQuery}`).get(...params)).total;
-    const otherExpense = (await db.prepare(`SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE category != 'GAZ' AND (is_active = 1 OR is_active IS NULL) ${minDateQuery}`).get(...params)).total;
-    const totalExpenses = gasExpense + otherExpense;
-
-    const netProfit = totalSoldSum - buyStats.total_bought_sum - totalExpenses;
-
     res.json({
+      period: period || 'all',
       stock: {
         karton_kg: Math.round(kartonStockKg * 10) / 10,
         salafan_kg: Math.round(salafanStockKg * 10) / 10
@@ -697,20 +726,10 @@ app.get('/api/stats', async (req, res) => {
         karton_kg: Math.round(kartonStockKg * 10) / 10,
         salafan_kg: Math.round(salafanStockKg * 10) / 10
       },
-      turnover: {
-        total_karton_bought_kg: buyStats.total_karton_bought_kg,
-        total_salafan_bought_kg: buyStats.total_salafan_bought_kg,
-        total_karton_sold_kg: saleKarton.total_sold_kg,
-        total_salafan_sold_kg: saleSalafan.total_sold_kg
-      },
-      financial: {
-        total_sales_income: totalSoldSum,
-        total_purchases_cost: buyStats.total_bought_sum,
-        gas_expenses: gasExpense,
-        other_expenses: otherExpense,
-        total_expenses: totalExpenses,
-        net_profit: netProfit
-      }
+      turnover: activeTurnover,
+      financial: activeFinancial,
+      all_time: allTime,
+      current_month: currentMonthStats
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -908,6 +927,15 @@ app.post('/api/month-closures', async (req, res) => {
     const { closure_date, closed_by } = req.body;
     const result = await db.prepare('INSERT INTO month_closures (closure_date, closed_by) VALUES (?, ?)').run(closure_date, closed_by || '');
     res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/month-closures/:id', async (req, res) => {
+  try {
+    await db.prepare('DELETE FROM month_closures WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

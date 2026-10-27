@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Wallet, TrendingUp, ShoppingBag, Fuel, DollarSign, Settings, 
   ShieldAlert, Check, Plus, Trash2, Key, AlertTriangle, Edit2, Users, List
@@ -31,12 +31,13 @@ export default function FinancialView({ currentUser }) {
   const [founderAmount, setFounderAmount] = useState('');
   const [founderNotes, setFounderNotes] = useState('');
   const [founderDate, setFounderDate] = useState('');
+  const [period, setPeriod] = useState('all');
 
-  const loadData = async () => {
+  const loadData = async (activePeriod = period) => {
     try {
       setLoading(true);
       const [resSt, resExp, resCat, resFounders, resTrans] = await Promise.all([
-        fetch('/api/stats'),
+        fetch(`/api/stats?period=${activePeriod}`),
         fetch('/api/expenses'),
         fetch('/api/expense-categories'),
         fetch('/api/founders'),
@@ -59,6 +60,11 @@ export default function FinancialView({ currentUser }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePeriodChange = (newPeriod) => {
+    setPeriod(newPeriod);
+    loadData(newPeriod);
   };
 
   useEffect(() => {
@@ -213,6 +219,39 @@ export default function FinancialView({ currentUser }) {
 
       {activeTab === 'FINANCE' && (
         <>
+          {/* Davr Tanlash (Period Switcher) */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-bold text-slate-600">Hisobot Ko'rinishi:</span>
+              <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => handlePeriodChange('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
+                    period === 'all' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Barcha Davr (Uzluksiz)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePeriodChange('month')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
+                    period === 'month' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Joriy Oy (Oktyabr)
+                </button>
+              </div>
+            </div>
+
+            <span className="text-xs text-slate-500 font-medium">
+              {period === 'all' 
+                ? "📌 Tizimdagi barcha hisob-kitoblar (hech qachon nollanmaydi)" 
+                : "📅 Faqat joriy oy aylanmasi va foydasi"}
+            </span>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between">
