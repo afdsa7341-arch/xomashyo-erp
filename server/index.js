@@ -950,13 +950,67 @@ app.get('/api/reconciliation', async (req, res) => {
       SELECT 
         d.id, d.store_id, d.date, d.status,
         d.karton_kg, d.salafan_kg, d.karton_price_snapshot as karton_price, d.salafan_price_snapshot as salafan_price, d.total_amount as total_price,
+        d.paid_amount, d.payment_type, d.notes,
         s.name as store_name, s.network_name
       FROM deliveries d
       JOIN stores s ON d.store_id = s.id
       WHERE (d.is_active = 1 OR d.is_active IS NULL)
-      ORDER BY d.date DESC
+      ORDER BY d.date DESC, d.id DESC
     `).all();
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Do'kondagi reys / xarid ma'lumotlarini tahrirlash (Tuzatuvchi)
+app.put('/api/deliveries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      karton_kg, salafan_kg, karton_price, salafan_price, 
+      total_price, paid_amount, payment_type, notes, date, status 
+    } = req.body;
+
+    const k_kg = Number(karton_kg) || 0;
+    const s_kg = Number(salafan_kg) || 0;
+    const k_p = Number(karton_price) || 0;
+    const s_p = Number(salafan_price) || 0;
+    const total = total_price != null ? Number(total_price) : (k_kg * k_p + s_kg * s_p);
+    const paid = paid_amount != null ? Number(paid_amount) : total;
+
+    await db.prepare(`
+      UPDATE deliveries
+      SET 
+        karton_kg = ?,
+        salafan_kg = ?,
+        karton_price_snapshot = ?,
+        salafan_price_snapshot = ?,
+        total_amount = ?,
+        paid_amount = ?,
+        payment_type = ?,
+        notes = ?,
+        date = ?,
+        status = ?
+      WHERE id = ?
+    `).run(
+      k_kg, s_kg, k_p, s_p, total, paid, 
+      payment_type || 'NAQD', notes || '', date || getTodayDate(), 
+      status || 'BAJARILDI', id
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reys / xaridni o'chirish (Soft delete)
+app.delete('/api/deliveries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.prepare('UPDATE deliveries SET is_active = 0 WHERE id = ?').run(id);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
