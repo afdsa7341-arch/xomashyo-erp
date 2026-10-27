@@ -1016,6 +1016,27 @@ app.delete('/api/deliveries/:id', async (req, res) => {
   }
 });
 
+// Qarzlarni to'lash / Naqdga yoki Kartaga o'tkazish
+app.post('/api/deliveries/settle-debt', async (req, res) => {
+  try {
+    const { delivery_ids, payment_type } = req.body;
+    const targetType = payment_type === 'KARTA' ? 'KARTA' : 'NAQD';
+
+    if (Array.isArray(delivery_ids) && delivery_ids.length > 0) {
+      for (const id of delivery_ids) {
+        await db.prepare(`
+          UPDATE deliveries
+          SET payment_type = ?, paid_amount = total_amount
+          WHERE id = ? AND payment_type = 'QARZ'
+        `).run(targetType, id);
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Static frontend buildni taqdim qilish
 const distPath = path.join(__dirname, '..', 'dist');
 app.use(express.static(distPath));

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Calendar, Filter, CheckCircle, Search, AlertCircle, RefreshCw, 
   Layers, Download, Edit2, Trash2, Building, DollarSign, CreditCard, 
-  Clock, X, Save, FileText
+  Clock, X, Save, FileText, CheckCheck
 } from 'lucide-react';
 
 export default function ReconciliationView() {
@@ -35,6 +35,11 @@ export default function ReconciliationView() {
   const [editDate, setEditDate] = useState('');
   const [editStatus, setEditStatus] = useState('BAJARILDI');
   const [editNotes, setEditNotes] = useState('');
+
+  // Qarzni To'lash (Naqdga o'tkazish) modallari
+  const [showSettleModal, setShowSettleModal] = useState(false);
+  const [settleTargetType, setSettleTargetType] = useState('NAQD');
+  const [showCloseModal, setShowCloseModal] = useState(false);
 
   const loadData = async () => {
     try {
@@ -138,6 +143,164 @@ export default function ReconciliationView() {
     }
   };
 
+  // 1 ta qator bo'yicha qarzni tezda Naqdga o'tkazish
+  const handleQuickSettleRow = async (deliveryId, targetType = 'NAQD') => {
+    if (!window.confirm(`Ushbu do'kon qarzi to'landimi? To'lov turi '${targetType}'ga o'tkaziladi.`)) return;
+    try {
+      const res = await fetch('/api/deliveries/settle-debt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          delivery_ids: [deliveryId],
+          payment_type: targetType
+        })
+      });
+      if (res.ok) {
+        loadData();
+      }
+    } catch (err) {
+      alert("Xatolik: " + err.message);
+    }
+  };
+
+  // Tanlangan / filtrlangan barcha qarzlarni to'lash (Naqdga o'tkazish)
+  const handleSettleFilteredDebts = async (targetType = 'NAQD') => {
+    const qarzItems = filtered.filter(d => d.payment_type === 'QARZ');
+    if (qarzItems.length === 0) {
+      alert("To'lanmagan qarzdorliklar topilmadi!");
+      return;
+    }
+    try {
+      const res = await fetch('/api/deliveries/settle-debt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          delivery_ids: qarzItems.map(d => d.id),
+          payment_type: targetType
+        })
+      });
+      if (res.ok) {
+        alert(`Barcha qarzdorliklar muvaffaqiyatli ${targetType} to'lovga o'tkazildi! Qarz yopildi.`);
+        setShowSettleModal(false);
+        loadData();
+      } else {
+        const err = await res.json();
+        alert("Xatolik: " + (err.error || 'Xatolik yuz berdi'));
+      }
+    } catch (err) {
+      alert("Xatolik: " + err.message);
+    }
+  };
+
+  // Muayan bitta tashkilot bo'yicha qarzni to'lash
+  const handleSettleSpecificNetwork = async (networkName, targetType = 'NAQD') => {
+    const qarzItems = deliveries.filter(d => (d.network_name === networkName || (!d.network_name && networkName === "Mustaqil do'konlar")) && d.payment_type === 'QARZ');
+    if (qarzItems.length === 0) {
+      alert(`${networkName} bo'yicha to'lanmagan qarz yo'q!`);
+      return;
+    }
+    if (!window.confirm(`${networkName} bo'yicha jami qarz to'landimi? Hammasi ${targetType}ga o'tkaziladi.`)) return;
+    try {
+      const res = await fetch('/api/deliveries/settle-debt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          delivery_ids: qarzItems.map(d => d.id),
+          payment_type: targetType
+        })
+      });
+      if (res.ok) {
+        alert(`${networkName} qarzlari muvaffaqiyatli ${targetType} to'lovga o'tkazildi!`);
+        loadData();
+      }
+    } catch (err) {
+      alert("Xatolik: " + err.message);
+    }
+  };
+
+  // Oyni yopish tugmasi bosilganda: Agar qarz bo'lsa modal ochiladi, bo'lmasa to'g'ridan to'g'ri yopiladi
+  const handleCloseMonthClick = () => {
+    const qarzItems = filtered.filter(d => d.payment_type === 'QARZ');
+    if (qarzItems.length > 0) {
+      setShowCloseModal(true);
+    } else {
+      executeCloseMonthOnly();
+    }
+  };
+
+  // Oyni yopish + Qarzlarni to'lovga o'tkazish
+  const handleCloseMonthWithSettlement = async (settleOption) => {
+    try {
+      if (settleOption === 'NAQD' || settleOption === 'KARTA') {
+        const qarzItems = filtered.filter(d => d.payment_type === 'QARZ');
+        if (qarzItems.length > 0) {
+          await fetch('/api/deliveries/settle-debt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              delivery_ids: qarzItems.map(d => d.id),
+              payment_type: settleOption
+            })
+          });
+        }
+      }
+
+      const res = await fetch('/api/month-closures', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          closure_date: new Date().toISOString().split('T')[0],
+          closed_by: 'Admin'
+        })
+      });
+
+      if (res.ok) {
+        if (settleOption === 'NAQD' || settleOption === 'KARTA') {
+          alert(`Oylik hisobot saqlandi va barcha qarzdorliklar ${settleOption} to'lovga o'tkazildi!`);
+        } else {
+          alert("Oylik hisobot saqlandi (Qarzlar keyingi oyga o'tdi).");
+        }
+        setShowCloseModal(false);
+        loadData();
+      }
+    } catch (err) {
+      alert("Xatolik yuz berdi: " + err.message);
+    }
+  };
+
+  const executeCloseMonthOnly = async () => {
+    if (!window.confirm("Ushbu oy bo'yicha hisobotni saqlamoqchimisiz?")) return;
+    try {
+      const res = await fetch('/api/month-closures', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          closure_date: new Date().toISOString().split('T')[0],
+          closed_by: 'Admin'
+        })
+      });
+      if (res.ok) {
+        alert("Oylik hisobot muvaffaqiyatli saqlandi!");
+        loadData();
+      }
+    } catch (err) {
+      alert("Xatolik: " + err.message);
+    }
+  };
+
+  const handleUndoClosure = async (closureId) => {
+    if (!window.confirm("Rostdan ham ushbu oy yopilishini bekor qilmoqchimisiz? Barcha eski oylar hisoboti qayta ochiladi.")) return;
+    try {
+      const res = await fetch(`/api/month-closures/${closureId}`, { method: 'DELETE' });
+      if (res.ok) {
+        alert("Oy yopilishi muvaffaqiyatli bekor qilindi!");
+        loadData();
+      }
+    } catch (err) {
+      alert("Xatolik yuz berdi: " + err.message);
+    }
+  };
+
   const exportToExcel = () => {
     const headers = ['Sana', 'Tarmoq / Tashkilot', 'Do\'kon', 'Holati', 'Karton (kg)', 'Karton Narxi', 'Salafan (kg)', 'Salafan Narxi', 'Jami Summa', 'To\'lov Usuli', 'Izoh'];
     const rows = filtered.map(d => [
@@ -177,41 +340,6 @@ export default function ReconciliationView() {
     a.download = `Sverka_${startDate}_dan_${endDate}_gacha.xls`;
     a.click();
     URL.revokeObjectURL(url);
-  };
-
-  const handleUndoClosure = async (closureId) => {
-    if (!window.confirm("Rostdan ham ushbu oy yopilishini bekor qilmoqchimisiz? Barcha eski oylar hisoboti qayta ochiladi.")) return;
-    try {
-      const res = await fetch(`/api/month-closures/${closureId}`, { method: 'DELETE' });
-      if (res.ok) {
-        alert("Oy yopilishi muvaffaqiyatli bekor qilindi!");
-        loadData();
-      }
-    } catch (err) {
-      alert("Xatolik yuz berdi: " + err.message);
-    }
-  };
-
-  const handleCloseMonth = async () => {
-    if (!window.confirm("Ushbu oy bo'yicha hisobotni belgilamoqchimisiz? Tizim hisob-kitoblari o'chmaydi va uzluksiz davom etadi.")) {
-      return;
-    }
-    try {
-      const res = await fetch('/api/month-closures', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          closure_date: new Date().toISOString().split('T')[0],
-          closed_by: 'Admin'
-        })
-      });
-      if (res.ok) {
-        alert("Oylik hisobot muvaffaqiyatli belgilandi!");
-        loadData();
-      }
-    } catch (err) {
-      alert("Xatolik yuz berdi: " + err.message);
-    }
   };
 
   // Filtrlangaan ma'lumotlar
@@ -300,7 +428,7 @@ export default function ReconciliationView() {
           </button>
 
           <button 
-            onClick={handleCloseMonth}
+            onClick={handleCloseMonthClick}
             className="flex items-center space-x-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow-sm transition"
           >
             <CheckCircle className="w-4 h-4 text-emerald-400" />
@@ -361,12 +489,26 @@ export default function ReconciliationView() {
           <div className="text-lg font-black text-blue-700 mt-0.5">{totalKarta.toLocaleString()} so'm</div>
         </div>
 
-        <div className="bg-rose-50 p-3.5 rounded-2xl border border-rose-200 shadow-sm text-center">
-          <div className="text-[10px] font-bold text-rose-700 uppercase flex items-center justify-center space-x-1">
-            <Clock className="w-3 h-3" />
-            <span>Qarz (To'lanmagan)</span>
+        <div className="bg-rose-50 p-3.5 rounded-2xl border border-rose-200 shadow-sm text-center flex flex-col justify-between">
+          <div>
+            <div className="text-[10px] font-bold text-rose-700 uppercase flex items-center justify-center space-x-1">
+              <Clock className="w-3 h-3" />
+              <span>Qarz (To'lanmagan)</span>
+            </div>
+            <div className="text-lg font-black text-rose-700 mt-0.5">{totalQarz.toLocaleString()} so'm</div>
           </div>
-          <div className="text-lg font-black text-rose-700 mt-0.5">{totalQarz.toLocaleString()} so'm</div>
+          {totalQarz > 0 && (
+            <button
+              onClick={() => {
+                setSettleTargetType('NAQD');
+                setShowSettleModal(true);
+              }}
+              className="mt-2 w-full py-1.5 px-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-[10px] font-black shadow-sm transition flex items-center justify-center space-x-1"
+            >
+              <DollarSign className="w-3 h-3" />
+              <span>Qarzni To'lash (Naqdga)</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -422,6 +564,16 @@ export default function ReconciliationView() {
                     <span className="font-bold">{net.qarz.toLocaleString()} so'm</span>
                   </div>
                 </div>
+
+                {net.qarz > 0 && (
+                  <button
+                    onClick={() => handleSettleSpecificNetwork(net.name, 'NAQD')}
+                    className="w-full mt-2 py-1.5 px-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-sm transition flex items-center justify-center space-x-1"
+                  >
+                    <DollarSign className="w-3 h-3" />
+                    <span>Qarzni Naqd To'lash ({net.qarz.toLocaleString()} so'm)</span>
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -596,7 +748,16 @@ export default function ReconciliationView() {
                         <td className="py-2.5 px-3 text-slate-500 text-[11px] max-w-[140px] truncate" title={d.notes}>
                           {d.notes || '-'}
                         </td>
-                        <td className="py-2.5 px-3 text-center">
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap space-x-1">
+                          {d.payment_type === 'QARZ' && (
+                            <button
+                              onClick={() => handleQuickSettleRow(d.id, 'NAQD')}
+                              className="p-1.5 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition"
+                              title="Qarz to'landi (Naqdga o'tkazish)"
+                            >
+                              <DollarSign className="w-4 h-4" />
+                            </button>
+                          )}
                           <button
                             onClick={() => handleStartEdit(d)}
                             className="p-1.5 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition"
@@ -794,6 +955,168 @@ export default function ReconciliationView() {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 7. QARZNI TO'LASH MODAL OYNASI (SETTLE MODAL) */}
+      {showSettleModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center space-x-2">
+                <DollarSign className="w-5 h-5 text-emerald-600" />
+                <h3 className="text-base font-black text-slate-800">
+                  Qarzni To'lash (Naqd / Kartaga O'tkazish)
+                </h3>
+              </div>
+              <button onClick={() => setShowSettleModal(false)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-1">
+              <span className="text-xs text-rose-600 font-bold block">Tanlangan qarzdorlik summasi:</span>
+              <span className="text-2xl font-black text-rose-700">{totalQarz.toLocaleString()} so'm</span>
+              <p className="text-[11px] text-slate-500 mt-1">
+                {filterNetwork ? `${filterNetwork} tashkiloti bo'yicha` : "Barcha filtrlangan do'konlar bo'yicha"}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Pul qanday to'landi?</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSettleTargetType('NAQD')}
+                  className={`py-3 rounded-xl border text-xs font-extrabold flex items-center justify-center space-x-1.5 transition ${
+                    settleTargetType === 'NAQD' 
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' 
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <DollarSign className="w-4 h-4" />
+                  <span>💵 NAQD Pul Berildi</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSettleTargetType('KARTA')}
+                  className={`py-3 rounded-xl border text-xs font-extrabold flex items-center justify-center space-x-1.5 transition ${
+                    settleTargetType === 'KARTA' 
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-md' 
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span>💳 KARTA / Perevod</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t flex items-center justify-end space-x-2">
+              <button
+                type="button"
+                onClick={() => setShowSettleModal(false)}
+                className="px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Bekor qilish
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSettleFilteredDebts(settleTargetType)}
+                className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition flex items-center space-x-1.5"
+              >
+                <CheckCheck className="w-4 h-4" />
+                <span>To'lovni Tasdiqlash</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. OYNI YOPISH VA QARZLARNI NAQDGA O'TKAZISH MODALI */}
+      {showCloseModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center space-x-2">
+                <CheckCircle className="w-5 h-5 text-emerald-600" />
+                <h3 className="text-base font-black text-slate-800">
+                  Oylik Hisobotni Saqlash & Qarzlarni Yopish
+                </h3>
+              </div>
+              <button onClick={() => setShowCloseModal(false)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-900">Ushbu oy bo'yicha to'lanmagan qarz mavjud:</span>
+                <span className="text-base font-black text-rose-700">{totalQarz.toLocaleString()} so'm</span>
+              </div>
+              <p className="text-[11px] text-amber-800">
+                Oy yopilayotganda tashkilotlar (do'konlar) bilan hisob-kitob qilinib, pul to'landimi?
+              </p>
+            </div>
+
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => handleCloseMonthWithSettlement('NAQD')}
+                className="w-full p-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md transition flex items-center justify-between"
+              >
+                <div className="flex items-center space-x-2 text-left">
+                  <DollarSign className="w-5 h-5 flex-shrink-0" />
+                  <div>
+                    <span className="block text-sm">💵 Ha, Pul Naqd To'landi va Oyni Yopish</span>
+                    <span className="text-[10px] font-normal text-emerald-100">Barcha {totalQarz.toLocaleString()} so'm qarz NAQD to'lovga o'tkaziladi</span>
+                  </div>
+                </div>
+                <span>→</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCloseMonthWithSettlement('KARTA')}
+                className="w-full p-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-md transition flex items-center justify-between"
+              >
+                <div className="flex items-center space-x-2 text-left">
+                  <CreditCard className="w-5 h-5 flex-shrink-0" />
+                  <div>
+                    <span className="block text-sm">💳 Ha, Karta Orqali To'landi va Oyni Yopish</span>
+                    <span className="text-[10px] font-normal text-blue-100">Barcha {totalQarz.toLocaleString()} so'm qarz KARTA to'loviga o'tkaziladi</span>
+                  </div>
+                </div>
+                <span>→</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCloseMonthWithSettlement('LEAVE_DEBT')}
+                className="w-full p-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center justify-between border border-slate-200"
+              >
+                <div className="flex items-center space-x-2 text-left">
+                  <Clock className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                  <div>
+                    <span className="block">⏳ Yo'q, Qarzligicha Qoldirish va Oyni Yopish</span>
+                    <span className="text-[10px] text-slate-500 font-normal">Qarzlar keyingi oyga qarz sifatida o'tadi</span>
+                  </div>
+                </div>
+                <span>→</span>
+              </button>
+            </div>
+
+            <div className="pt-2 border-t flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowCloseModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Bekor qilish
+              </button>
+            </div>
           </div>
         </div>
       )}
