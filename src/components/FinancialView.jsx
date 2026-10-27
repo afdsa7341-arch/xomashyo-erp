@@ -9,6 +9,8 @@ export default function FinancialView({ currentUser }) {
   const [expenses, setExpenses] = useState([]);
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [founders, setFounders] = useState([]);
+  const [founderTransactions, setFounderTransactions] = useState([]);
+  const [founderTransType, setFounderTransType] = useState('WITHDRAW');
   const [loading, setLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState('FINANCE');
@@ -33,22 +35,25 @@ export default function FinancialView({ currentUser }) {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [resSt, resExp, resCat, resFounders] = await Promise.all([
+      const [resSt, resExp, resCat, resFounders, resTrans] = await Promise.all([
         fetch('/api/stats'),
         fetch('/api/expenses'),
         fetch('/api/expense-categories'),
-        fetch('/api/founders')
+        fetch('/api/founders'),
+        fetch('/api/founder-transactions')
       ]);
 
       const st = await resSt.json();
       const exp = await resExp.json();
       const cat = await resCat.json();
       const fnd = await resFounders.json();
+      const tr = await resTrans.json();
 
       setStats(st);
       setExpenses(Array.isArray(exp) ? exp : []);
       setExpenseCategories(Array.isArray(cat) ? cat : []);
       setFounders(Array.isArray(fnd) ? fnd : []);
+      setFounderTransactions(Array.isArray(tr) ? tr : []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -141,21 +146,38 @@ export default function FinancialView({ currentUser }) {
     loadData();
   };
 
-  const handleAddDividend = async (e) => {
+  const handleSaveFounderTransaction = async (e) => {
     e.preventDefault();
     try {
-      await fetch('/api/founder-transactions', {
+      const res = await fetch('/api/founder-transactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           founder_id: selectedFounderId,
+          type: founderTransType,
           amount: founderAmount,
           notes: founderNotes,
-          date: founderDate
+          date: founderDate || new Date().toISOString().split('T')[0]
         })
       });
-      setShowFounderModal(false);
-      loadData();
+      if (res.ok) {
+        setShowFounderModal(false);
+        setFounderAmount('');
+        setFounderNotes('');
+        loadData();
+      }
+    } catch (err) {
+      alert('Xatolik: ' + err.message);
+    }
+  };
+
+  const handleDeleteFounderTransaction = async (id) => {
+    if (!window.confirm("Ushbu yozuvni o'chirmoqchimisiz? Ta'sischi balansi qayta tiklanadi.")) return;
+    try {
+      const res = await fetch(`/api/founder-transactions/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        loadData();
+      }
     } catch (err) {
       alert('Xatolik: ' + err.message);
     }
@@ -304,27 +326,168 @@ export default function FinancialView({ currentUser }) {
       )}
 
       {activeTab === 'FOUNDERS' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-base font-bold text-slate-800 flex items-center space-x-2">
-              <Users className="w-5 h-5 text-indigo-600" />
-              <span>Ta'sischilar Balansi</span>
-            </h3>
-            <button onClick={() => { setSelectedFounderId(founders[0]?.id || ''); setFounderAmount(''); setFounderNotes(''); setShowFounderModal(true); }} className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold transition shadow-sm">
-              <Plus className="w-3.5 h-3.5" />
-              <span>Pul Yechish (Divident)</span>
-            </button>
-          </div>
-          <div className="p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {founders.map(f => (
-              <div key={f.id} className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl text-center">
-                <div className="text-indigo-800 font-extrabold text-sm mb-1">{f.name}</div>
-                <div className={`text-xl font-black ${f.balance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  {f.balance?.toLocaleString()} <span className="text-xs font-normal">so'm</span>
-                </div>
-                <div className="text-[10px] text-indigo-400 font-medium uppercase mt-1">Joriy qoldiq</div>
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-800 flex items-center space-x-2">
+                  <Users className="w-5 h-5 text-indigo-600" />
+                  <span>Ta'sischilar Hisob-Kitobi va Balansi</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Shaxsiy ehtiyoj, kredit, yem uchun pul yechish va keyinchalik sotuvdan yoki yonidan to'lash hisobi
+                </p>
               </div>
-            ))}
+              <div className="flex flex-wrap gap-2">
+                <button 
+                  onClick={() => { 
+                    setSelectedFounderId(founders[0]?.id || ''); 
+                    setFounderTransType('WITHDRAW');
+                    setFounderAmount(''); 
+                    setFounderNotes(''); 
+                    setFounderDate(new Date().toISOString().split('T')[0]);
+                    setShowFounderModal(true); 
+                  }} 
+                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                >
+                  <TrendingUp className="w-3.5 h-3.5 rotate-180" />
+                  <span>[-] Pul Yechish (Qarz/Ehtiyoj)</span>
+                </button>
+
+                <button 
+                  onClick={() => { 
+                    setSelectedFounderId(founders[0]?.id || ''); 
+                    setFounderTransType('DEPOSIT');
+                    setFounderAmount(''); 
+                    setFounderNotes(''); 
+                    setFounderDate(new Date().toISOString().split('T')[0]);
+                    setShowFounderModal(true); 
+                  }} 
+                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>[+] Qarzni Qaytarish (Pul kiritish)</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {founders.map(f => {
+                const bal = f.balance || 0;
+                return (
+                  <div key={f.id} className={`p-5 rounded-2xl border transition shadow-sm ${
+                    bal < 0 ? 'bg-rose-50/60 border-rose-200' : (bal > 0 ? 'bg-emerald-50/60 border-emerald-200' : 'bg-slate-50 border-slate-200')
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-extrabold text-sm text-slate-800">{f.name}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                        bal < 0 ? 'bg-rose-100 text-rose-700' : (bal > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600')
+                      }`}>
+                        {bal < 0 ? 'Korxonadan qarzdor' : (bal > 0 ? 'Haqdor' : 'Hisob toza')}
+                      </span>
+                    </div>
+
+                    <div className={`text-2xl font-black ${bal < 0 ? 'text-rose-600' : (bal > 0 ? 'text-emerald-600' : 'text-slate-700')}`}>
+                      {bal.toLocaleString()} <span className="text-xs font-normal">so'm</span>
+                    </div>
+
+                    <div className="flex items-center space-x-2 mt-4 pt-3 border-t border-slate-200/60">
+                      <button
+                        onClick={() => {
+                          setSelectedFounderId(f.id);
+                          setFounderTransType('WITHDRAW');
+                          setFounderAmount('');
+                          setFounderNotes('');
+                          setFounderDate(new Date().toISOString().split('T')[0]);
+                          setShowFounderModal(true);
+                        }}
+                        className="flex-1 py-1.5 px-2 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 rounded-lg text-xs font-bold transition text-center"
+                      >
+                        [-] Yechish
+                      </button>
+                      <button
+                        onClick={() => {
+                          setSelectedFounderId(f.id);
+                          setFounderTransType('DEPOSIT');
+                          setFounderAmount('');
+                          setFounderNotes('');
+                          setFounderDate(new Date().toISOString().split('T')[0]);
+                          setShowFounderModal(true);
+                        }}
+                        className="flex-1 py-1.5 px-2 bg-white hover:bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg text-xs font-bold transition text-center"
+                      >
+                        [+] Qaytarish
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <h4 className="text-sm font-bold text-slate-800 flex items-center space-x-2">
+                <List className="w-4 h-4 text-indigo-600" />
+                <span>Ta'sischilar Harakatlari Tarixi</span>
+              </h4>
+              <span className="text-xs font-semibold text-slate-400">Jami {founderTransactions.length} ta yozuv</span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 font-bold uppercase border-b border-slate-100">
+                  <tr>
+                    <th className="py-3 px-4">Sana</th>
+                    <th className="py-3 px-4">Ta'sischi</th>
+                    <th className="py-3 px-4">Amaliyot Turi</th>
+                    <th className="py-3 px-4">Summa</th>
+                    <th className="py-3 px-4">Izoh</th>
+                    <th className="py-3 px-4 text-right">Amallar</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {founderTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="py-8 text-center text-slate-400 font-medium">
+                        Hozircha hech qanday pul yechish yoki qaytarish yozuvi kiritilmagan
+                      </td>
+                    </tr>
+                  ) : (
+                    founderTransactions.map(tr => (
+                      <tr key={tr.id} className="hover:bg-slate-50 transition">
+                        <td className="py-3 px-4 font-semibold text-slate-500">{tr.date}</td>
+                        <td className="py-3 px-4 font-bold text-slate-800">{tr.founder_name}</td>
+                        <td className="py-3 px-4">
+                          {tr.type === 'DEPOSIT' ? (
+                            <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 font-bold rounded-lg text-[11px]">
+                              Qarz Qaytarildi / Kassa to'ldirildi
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 bg-rose-100 text-rose-700 font-bold rounded-lg text-[11px]">
+                              Pul Yechildi / Shaxsiy Qarz
+                            </span>
+                          )}
+                        </td>
+                        <td className={`py-3 px-4 font-extrabold text-sm ${tr.type === 'DEPOSIT' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {tr.type === 'DEPOSIT' ? '+' : '-'}{tr.amount?.toLocaleString()} so'm
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 font-medium">{tr.notes || '-'}</td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            onClick={() => handleDeleteFounderTransaction(tr.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                            title="O'chirish"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -382,29 +545,63 @@ export default function FinancialView({ currentUser }) {
       {showFounderModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl">
-            <h3 className="text-base font-bold text-slate-800 mb-4">Pul Yechish (Divident)</h3>
-            <form onSubmit={handleAddDividend} className="space-y-3">
+            <h3 className="text-base font-bold text-slate-800 mb-4">
+              {founderTransType === 'DEPOSIT' ? 'Qarzni Qaytarish / Pul Kiritish' : 'Pul Yechish (Qarz / Ehtiyoj)'}
+            </h3>
+            <form onSubmit={handleSaveFounderTransaction} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Harakat Turi:</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFounderTransType('WITHDRAW')}
+                    className={`py-2 px-3 text-xs font-bold rounded-xl border transition ${
+                      founderTransType === 'WITHDRAW' ? 'bg-rose-50 border-rose-300 text-rose-700' : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    [-] Pul Yechish
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFounderTransType('DEPOSIT')}
+                    className={`py-2 px-3 text-xs font-bold rounded-xl border transition ${
+                      founderTransType === 'DEPOSIT' ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    [+] Qaytarish
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Ta'sischi:</label>
                 <select value={selectedFounderId} onChange={(e) => setSelectedFounderId(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold">
                   {founders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </select>
               </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Summa (so'm):</label>
-                <input type="number" required value={founderAmount} onChange={(e) => setFounderAmount(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" />
+                <input type="number" required value={founderAmount} onChange={(e) => setFounderAmount(e.target.value)} placeholder="0" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" />
               </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Sana:</label>
                 <input type="date" required value={founderDate} onChange={(e) => setFounderDate(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold" />
               </div>
+
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Izoh (ixtiyoriy):</label>
-                <input type="text" value={founderNotes} onChange={(e) => setFounderNotes(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" />
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Izoh (Masalan: Kreditga, Yemga, Qarz qaytdi):</label>
+                <input type="text" value={founderNotes} onChange={(e) => setFounderNotes(e.target.value)} placeholder="Izoh kiriting..." className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs" />
               </div>
+
               <div className="pt-2 flex items-center justify-end space-x-2">
                 <button type="button" onClick={() => setShowFounderModal(false)} className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl">Bekor qilish</button>
-                <button type="submit" className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl">Saqlash</button>
+                <button type="submit" className={`px-4 py-2 text-xs font-bold text-white rounded-xl shadow-sm ${
+                  founderTransType === 'DEPOSIT' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'
+                }`}>
+                  Saqlash
+                </button>
               </div>
             </form>
           </div>

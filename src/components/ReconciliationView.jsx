@@ -88,6 +88,19 @@ export default function ReconciliationView() {
     URL.revokeObjectURL(url);
   };
 
+  const handleUndoClosure = async (closureId) => {
+    if (!window.confirm("Rostdan ham ushbu oy yopilishini bekor qilmoqchimisiz? Barcha eski oylar hisoboti qayta ochiladi.")) return;
+    try {
+      const res = await fetch(`/api/month-closures/${closureId}`, { method: 'DELETE' });
+      if (res.ok) {
+        alert("Oy yopilishi muvaffaqiyatli bekor qilindi!");
+        loadData();
+      }
+    } catch (err) {
+      alert("Xatolik yuz berdi: " + err.message);
+    }
+  };
+
   const handleCloseMonth = async () => {
     if (!window.confirm("Haqiqatan ham oyni yopmoqchimisiz? Barcha hisobotlar joriy sanadan boshlab noldan hisoblanadi.")) {
       return;
@@ -119,8 +132,8 @@ export default function ReconciliationView() {
     return true;
   });
 
-  const totalKarton = filtered.reduce((acc, curr) => acc + (curr.karton_kg || 0), 0);
-  const totalSalafan = filtered.reduce((acc, curr) => acc + (curr.salafan_kg || 0), 0);
+  const totalKarton = Math.round(filtered.reduce((acc, curr) => acc + (curr.karton_kg || 0), 0) * 10) / 10;
+  const totalSalafan = Math.round(filtered.reduce((acc, curr) => acc + (curr.salafan_kg || 0), 0) * 10) / 10;
   const totalSum = filtered.reduce((acc, curr) => acc + (curr.total_price || 0), 0);
 
   const partnerDiff = partnerAmount ? parseFloat(partnerAmount) - totalSum : null;
@@ -154,12 +167,20 @@ export default function ReconciliationView() {
       </div>
 
       {closures.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center justify-between text-amber-800">
+        <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-900 shadow-sm">
           <div className="flex items-center space-x-2">
-            <CheckCircle className="w-5 h-5" />
-            <span className="font-bold text-sm">Oxirgi marta oy yopilgan sana: {closures[0].closure_date}</span>
+            <CheckCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <div>
+              <span className="font-bold text-sm block">Oxirgi marta oy yopilgan sana: {closures[0].closure_date}</span>
+              <span className="text-xs text-amber-700">Tizim shu sanadan boshlab qoldiqlarni hisoblamoqda</span>
+            </div>
           </div>
-          <span className="text-xs font-semibold">Tizim shu sanadan boshlab qoldiqlarni hisoblamoqda</span>
+          <button
+            onClick={() => handleUndoClosure(closures[0].id)}
+            className="px-3 py-1.5 bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition shadow-sm self-start sm:self-auto"
+          >
+            Yopilishni Bekor Qilish (Tuzatish)
+          </button>
         </div>
       )}
 

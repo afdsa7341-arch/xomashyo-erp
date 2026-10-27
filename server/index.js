@@ -783,8 +783,22 @@ app.delete('/api/founders/:id', async (req, res) => {
 });
 
 // ==========================================
-// Founder Transactions (Divident olish/qo'shish)
+// Founder Transactions (Qarz olish, divident, qarzni qaytarish)
 // ==========================================
+app.get('/api/founder-transactions', async (req, res) => {
+  try {
+    const rows = await db.prepare(`
+      SELECT ft.*, f.name as founder_name 
+      FROM founder_transactions ft
+      JOIN founders f ON ft.founder_id = f.id
+      ORDER BY ft.date DESC, ft.id DESC
+    `).all();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/founder-transactions/:founder_id', async (req, res) => {
   try {
     const rows = await db.prepare('SELECT * FROM founder_transactions WHERE founder_id = ? ORDER BY date DESC, id DESC').all(req.params.founder_id);
@@ -796,19 +810,39 @@ app.get('/api/founder-transactions/:founder_id', async (req, res) => {
 
 app.post('/api/founder-transactions', async (req, res) => {
   try {
-    const { founder_id, amount, notes, date } = req.body;
+    const { founder_id, amount, notes, date, type } = req.body;
+    const numAmount = Number(amount) || 0;
+    const transType = type === 'DEPOSIT' ? 'DEPOSIT' : 'WITHDRAW';
     
     await db.prepare(`
-      INSERT INTO founder_transactions (founder_id, amount, notes, date)
-      VALUES (?, ?, ?, ?)
-    `).run(founder_id, amount, notes, date || getTodayDate());
+      INSERT INTO founder_transactions (founder_id, amount, notes, date, type)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(founder_id, numAmount, notes || '', date || getTodayDate(), transType);
     
-    // Ta'sischi balansini yangilash
+    // DEPOSIT (qarzni yopish/pul kiritish) -> balance oshadi
+    // WITHDRAW (pul yechish/qarz olish) -> balance kamayadi (minusga kiradi)
+    const delta = transType === 'DEPOSIT' ? numAmount : -numAmount;
     await db.prepare(`
       UPDATE founders 
-      SET balance = balance - ?
+      SET balance = balance + ?
       WHERE id = ?
-    `).run(amount, founder_id);
+    `).run(delta, founder_id);
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/founder-transactions/:id', async (req, res) => {
+  try {
+    const tr = await db.prepare('SELECT * FROM founder_transactions WHERE id = ?').get(req.params.id);
+    if (!tr) return res.status(404).json({ error: 'Topilmadi' });
+    
+    // Balansni qaytarish
+    const revertDelta = tr.type === 'DEPOSIT' ? -tr.amount : tr.amount;
+    await db.prepare('UPDATE founders SET balance = balance + ? WHERE id = ?').run(revertDelta, tr.founder_id);
+    await db.prepare('DELETE FROM founder_transactions WHERE id = ?').run(req.params.id);
 
     res.json({ success: true });
   } catch (err) {
